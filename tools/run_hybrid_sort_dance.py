@@ -188,6 +188,19 @@ def main(exp, args, num_gpu):
                        "--GT_FOLDER datasets/MOT20/ " \
                        "--TRACKERS_FOLDER " + results_folder + " " \
                        "--GT_LOC_FORMAT {gt_folder}/{seq}/gt/gt_val_half.txt"
+    elif args.dataset == "OinkTrack":
+        hota_command = "python3 TrackEval/scripts/run_mot_challenge.py " \
+                       "--SPLIT_TO_EVAL val  " \
+                       "--METRICS HOTA CLEAR Identity " \
+                       "--GT_FOLDER datasets/OinkTrack/val " \
+                       "--SEQMAP_FILE datasets/OinkTrack/val/val_seqmap.txt " \
+                       "--SKIP_SPLIT_FOL True " \
+                       "--TRACKERS_TO_EVAL '' " \
+                       "--TRACKER_SUB_FOLDER ''  " \
+                       "--USE_PARALLEL True " \
+                       "--NUM_PARALLEL_CORES 8 " \
+                       "--PLOT_CURVES False " \
+                       "--TRACKERS_FOLDER " + results_folder
     else:
         assert args.dataset in ["dancetrack", "mot17"]
     os.system(hota_command)

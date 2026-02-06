@@ -93,6 +93,10 @@ def main_dancetrack(args):
                 y2 = min(y2, H)
 
                 # patch = cv2.cvtColor(img[y1:y2, x1:x2, :], cv2.COLOR_BGR2RGB)
+                if(y2-y1<=0):
+                    y2 = y1 + 2
+                if(x2-x1<=0):
+                    x2 = x1 + 2
                 patch = img[y1:y2, x1:x2, :]        # crop image
 
                 max_id_per_seq = max(max_id_per_seq, id_)       # update 'max_id_per_seq'
@@ -172,4 +176,4 @@ def main_cuhksysu(args, id_offset, seq_offset=1000):
 if __name__ == "__main__":
     args = make_parser().parse_args()
     id_offset = main_dancetrack(args)                   # dancetrack
-    main_cuhksysu(args, id_offset, seq_offset=1000)     # cuhksysu
+    # main_cuhksysu(args, id_offset, seq_offset=1000)     # cuhksysu

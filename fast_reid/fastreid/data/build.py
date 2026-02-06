@@ -8,8 +8,9 @@ import logging
 import os
 
 import torch
-from torch._six import string_classes
-from collections import Mapping
+# from torch._six import string_classes
+# from collections import Mapping
+from collections.abc import Mapping
 
 from fast_reid.fastreid.config import configurable
 from fast_reid.fastreid.utils import comm
@@ -173,6 +174,7 @@ def fast_batch_collator(batched_inputs):
     A simple batch collator for most common reid tasks
     """
     elem = batched_inputs[0]
+    string_classes = (str,)
     if isinstance(elem, torch.Tensor):
         out = torch.zeros((len(batched_inputs), *elem.size()), dtype=elem.dtype)
         for i, tensor in enumerate(batched_inputs):

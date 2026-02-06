@@ -55,6 +55,10 @@ def make_parser():
     parser.add_argument("--public", action="store_true", help="use public detection")
     parser.add_argument('--asso', default="iou", help="similarity function: iou/giou/diou/ciou/ctdis")
     parser.add_argument("--use_byte", dest="use_byte", default=False, action="store_true", help="use byte in tracking.")
+    # ==========================================
+    # [新增] Max ID Number 參數
+    # ==========================================
+    parser.add_argument("--max_id_num", type=int, default=40, help="upper bound of ID number for in-house tracking")
 
     parser.add_argument("--TCM_first_step", default=False, action="store_true", help="use TCM in first step.")
     parser.add_argument("--TCM_byte_step", default=False, action="store_true", help="use TCM in byte step.")

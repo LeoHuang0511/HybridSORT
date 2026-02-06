@@ -142,3 +142,7 @@ visualizations
 results/
 error_log.txt
 .idea/
+
+*.jpg
+datasets/
+fast_reid/logs

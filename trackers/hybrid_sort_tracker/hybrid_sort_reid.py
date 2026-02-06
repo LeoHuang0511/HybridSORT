@@ -166,7 +166,6 @@ class KalmanBoxTracker(object):
 
         # momentum of embedding update
         self.alpha = self.args.alpha
-
     # ReID. for update embeddings during tracking
     def update_features(self, feat, score=-1):
         feat /= np.linalg.norm(feat)
@@ -322,6 +321,8 @@ class Hybrid_Sort_ReID(object):
         self.use_byte = args.use_byte
         self.args = args
         KalmanBoxTracker.count = 0
+        self.max_id_num = getattr(self.args, 'max_id_num', 40) # 這裡就能讀到您在 args.py 設定的值
+
 
     # ECC for CMC
     def camera_update(self, trackers, warp_matrix):
@@ -372,9 +373,12 @@ class Hybrid_Sort_ReID(object):
         for t, trk in enumerate(trks):
             pos, kalman_score, simple_score = self.trackers[t].predict()
             try:
-                trk[:] = [pos[0][0], pos[0][1], pos[0][2], pos[0][3], kalman_score, simple_score[0]]
+                trk[:] = [pos[0][0], pos[0][1], pos[0][2], pos[0][3], kalman_score[0], simple_score[0]]
             except:
-                trk[:] = [pos[0][0], pos[0][1], pos[0][2], pos[0][3], kalman_score, simple_score]
+                try:
+                    trk[:] = [pos[0][0], pos[0][1], pos[0][2], pos[0][3], kalman_score[0], simple_score]
+                except:
+                    trk[:] = [pos[0][0], pos[0][1], pos[0][2], pos[0][3], kalman_score, simple_score]
             if np.any(np.isnan(pos)):
                 to_del.append(t)
         trks = np.ma.compress_rows(np.ma.masked_invalid(trks))
@@ -398,11 +402,11 @@ class Hybrid_Sort_ReID(object):
         """
         if self.args.EG_weight_high_score > 0 and self.args.TCM_first_step:
             track_features = np.asarray([track.smooth_feat for track in self.trackers],
-                                        dtype=np.float)
+                                        dtype=float)
             emb_dists = embedding_distance(track_features, id_feature_keep).T
             if self.args.with_longterm_reid or self.args.with_longterm_reid_correction:
                 long_track_features = np.asarray([np.vstack(list(track.features)).mean(0) for track in self.trackers],
-                                                 dtype=np.float)
+                                                 dtype=float)
                 assert track_features.shape == long_track_features.shape
                 long_emb_dists = embedding_distance(long_track_features, id_feature_keep).T
                 assert emb_dists.shape == long_emb_dists.shape
@@ -449,7 +453,7 @@ class Hybrid_Sort_ReID(object):
                     iou_left -= np.array(cal_score_dif_batch_two_score(dets_second, u_trks) * self.args.TCM_byte_step_weight)
                     iou_left_thre = iou_left
                 if self.args.EG_weight_low_score > 0:
-                    u_track_features = np.asarray([track.smooth_feat for track in u_tracklets], dtype=np.float)
+                    u_track_features = np.asarray([track.smooth_feat for track in u_tracklets], dtype=float)
                     emb_dists_low_score = embedding_distance(u_track_features, id_feature_second).T
                     matched_indices = linear_assignment(-iou_left + self.args.EG_weight_low_score * emb_dists_low_score,
                                                         )
@@ -492,14 +496,118 @@ class Hybrid_Sort_ReID(object):
                     self.trackers[trk_ind].update(dets[det_ind, :], id_feature_keep[det_ind, :], update_feature=False)
                     to_remove_det_indices.append(det_ind)
                     to_remove_trk_indices.append(trk_ind)
-                unmatched_dets = np.setdiff1d(unmatched_dets, np.array(to_remove_det_indices))
-                unmatched_trks = np.setdiff1d(unmatched_trks, np.array(to_remove_trk_indices))
+                # unmatched_dets = np.setdiff1d(unmatched_dets, np.array(to_remove_det_indices))
+                # unmatched_trks = np.setdiff1d(unmatched_trks, np.array(to_remove_trk_indices))
+
+                # =========================================================================
+            # [MOD START] Custom Modification: Upper Bound ID & Extra Matching Rounds
+            # =========================================================================
+            
+            # 設定您的場景 ID 上限 (例如: 場景中只有 10 個物體)
+            # 建議將此參數放入 self.args.max_id_num 中以便外部控制
+            
+            # 判斷是否需要啟動額外匹配：
+            # 1. 還有剩下的 detection 沒配對到
+            # 2. 目前 ID 總數已經達到或超過上限 (代表不能隨便開新 ID 了)
+            #    或者您也可以設定為 "只要有剩餘 detection 就嘗試額外匹配"
+            if len(unmatched_dets) > 0 and KalmanBoxTracker.count >= self.max_id_num:
+                
+                # --- Extra Round 1: 寬鬆的 IoU 匹配 (Loose IoU) ---
+                if len(unmatched_trks) > 0:
+                    # 這裡我們使用 last_boxes (上次觀測值) 或是 trks (預測值) 皆可
+                    # 為了捕捉剛丟失的物體，使用 last_boxes (最後一次看到的框) 通常比較穩
+                    left_dets = dets[unmatched_dets]
+                    left_trks = last_boxes[unmatched_trks] 
+
+                    # 計算 IoU
+                    iou_extra = self.asso_func(left_dets, left_trks)
+                    iou_extra = np.array(iou_extra)
+                    
+                    # 設定一個非常低的閾值 (比原本的 self.iou_threshold 低很多)
+                    # 原本可能是 0.3，這裡只要有重疊 (>0.05) 就視為候選
+                    LOOSE_IOU_THRESH = 0.05
+                    
+                    # 進行匹配 (linear_assignment 吃的是 cost，所以用負號)
+                    extra_matches = linear_assignment(-iou_extra)
+                    
+                    to_remove_det = []
+                    to_remove_trk = []
+                    
+                    for m in extra_matches:
+                        det_idx_in_left = m[0]
+                        trk_idx_in_left = m[1]
+                        
+                        # 取得在原始陣列中的真實 index
+                        real_det_idx = unmatched_dets[det_idx_in_left]
+                        real_trk_idx = unmatched_trks[trk_idx_in_left]
+                        
+                        # 檢查閾值
+                        if iou_extra[det_idx_in_left, trk_idx_in_left] < LOOSE_IOU_THRESH:
+                            continue
+                        
+                        # 強制更新 Tracker
+                        # 注意: update_feature=True 視情況而定，如果這框很爛可能設 False
+                        self.trackers[real_trk_idx].update(dets[real_det_idx, :], id_feature_keep[real_det_idx, :], update_feature=True)
+                        
+                        to_remove_det.append(real_det_idx)
+                        to_remove_trk.append(real_trk_idx)
+                    
+                    # 更新未匹配清單
+                    unmatched_dets = np.setdiff1d(unmatched_dets, np.array(to_remove_det))
+                    unmatched_trks = np.setdiff1d(unmatched_trks, np.array(to_remove_trk))
+
+                # --- Extra Round 2: 中心點距離匹配 (Center Distance) ---
+                # 如果 IoU 為 0 (例如物體移動太快導致框沒有重疊)，可以用中心點距離來救
+                if len(unmatched_dets) > 0 and len(unmatched_trks) > 0:
+                    left_dets = dets[unmatched_dets]
+                    left_trks = last_boxes[unmatched_trks]
+                    
+                    # 計算中心點
+                    dets_c = (left_dets[:, :2] + left_dets[:, 2:4]) / 2.0
+                    trks_c = (left_trks[:, :2] + left_trks[:, 2:4]) / 2.0
+                    
+                    # 計算歐式距離矩陣
+                    dists = np.linalg.norm(dets_c[:, None, :] - trks_c[None, :, :], axis=2)
+                    
+                    # 設定最大允許距離 (例如圖像寬度的 1/5)
+                    MAX_DIST_THRESH = img_w * 0.2 
+                    
+                    dist_matches = linear_assignment(dists)
+                    
+                    to_remove_det = []
+                    to_remove_trk = []
+                    
+                    for m in dist_matches:
+                        det_idx_in_left = m[0]
+                        trk_idx_in_left = m[1]
+                        real_det_idx = unmatched_dets[det_idx_in_left]
+                        real_trk_idx = unmatched_trks[trk_idx_in_left]
+                        
+                        if dists[det_idx_in_left, trk_idx_in_left] > MAX_DIST_THRESH:
+                            continue
+                            
+                        self.trackers[real_trk_idx].update(dets[real_det_idx, :], id_feature_keep[real_det_idx, :], update_feature=True)
+                        to_remove_det.append(real_det_idx)
+                        to_remove_trk.append(real_trk_idx)
+
+                    unmatched_dets = np.setdiff1d(unmatched_dets, np.array(to_remove_det))
+                    unmatched_trks = np.setdiff1d(unmatched_trks, np.array(to_remove_trk))
+
+            # =========================================================================
+            # [MOD END]
+            # =========================================================================
 
         for m in unmatched_trks:
             self.trackers[m].update(None, None)
 
         # create and initialise new trackers for unmatched detections
         for i in unmatched_dets:
+            # [MOD START] 增加 Upper Bound 檢查
+            if KalmanBoxTracker.count >= self.max_id_num:
+                # 這裡有兩個選擇：
+                # 1. 直接忽略這個 detection (放棄追蹤) -> 適合雜訊多的環境
+                # 2. 強制重置最舊的或很久沒更新的 ID (如果業務邏輯允許)
+                continue
             trk = KalmanBoxTracker(dets[i, :], id_feature_keep[i, :], delta_t=self.delta_t, args=self.args)
             self.trackers.append(trk)
         i = len(self.trackers)
